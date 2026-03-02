@@ -5,8 +5,8 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 # Start Streamlit dashboard
-HOST=127.0.0.1
-PORT=6006
+HOST=0.0.0.0
+PORT=7855
 LOG_DIR="$PROJECT_ROOT/logs"
 
 mkdir -p "$LOG_DIR"
@@ -14,7 +14,12 @@ mkdir -p "$LOG_DIR"
 echo "Starting Streamlit dashboard on port $PORT"
 echo "Logs will be written to $LOG_DIR/dashboard.log"
 
-cd "$PROJECT_ROOT" && nohup uv run streamlit run src/llm_server/dashboard.py --server.port $PORT --server.address $HOST > "$LOG_DIR/dashboard.log" 2>&1 &
+cd "$PROJECT_ROOT" && nohup uv run streamlit run src/llm_server/dashboard.py \
+--server.port $PORT \
+--server.address $HOST \
+--server.enableCORS false \
+--server.enableXsrfProtection false \
+--server.headless true > "$LOG_DIR/dashboard.log" 2>&1 &
 echo $! > "$LOG_DIR/dashboard.pid"
 echo "Dashboard started with PID $(cat $LOG_DIR/dashboard.pid)"
 

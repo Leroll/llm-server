@@ -19,5 +19,6 @@ dependencies = [
 
 [tool.uv]
 index-url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+cache-dir = "/root/autodl-tmp/pkgs/uv_cache"
 package = true
-no-cache = true
+
