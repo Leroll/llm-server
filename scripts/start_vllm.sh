@@ -11,6 +11,7 @@ MODEL_NAME="qwen3-8b"
 PORT=8845
 MAX_MODEL_LEN=16384
 GPU_MEMORY_UTILIZATION=0.9
+CUDA_VISIBLE_DEVICES="0"
 LOG_DIR="$PROJECT_ROOT/logs"
 
 
@@ -21,9 +22,10 @@ mkdir -p "$LOG_DIR"
 
 echo "Starting vLLM server..."
 echo "Model: $MODEL_PATH on port $PORT"
+echo "GPUs: $CUDA_VISIBLE_DEVICES"
 echo "Logs will be written to $LOG_DIR/vllm.log"
 
-cd "$PROJECT_ROOT" && nohup uv run vllm serve \
+cd "$PROJECT_ROOT" && CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES nohup uv run vllm serve \
     $MODEL_PATH \
     --served-model-name $MODEL_NAME \
     --port $PORT \

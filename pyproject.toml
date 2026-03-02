@@ -3,7 +3,7 @@ name = "llm-server"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.10,<3.11"
 dependencies = [
     "fastapi>=0.133.1",
     "openai>=2.24.0",
@@ -16,3 +16,8 @@ dependencies = [
     "uvloop>=0.22.1",
     "vllm>=0.16.0",
 ]
+
+[tool.uv]
+index-url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+package = true
+no-cache = true
