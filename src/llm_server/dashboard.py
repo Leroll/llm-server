@@ -15,7 +15,11 @@ if 'prev_metrics' not in st.session_state:
         'ttft_count': 0,
         'ttft_sum': 0.0,
         'tpot_count': 0,
-        'tpot_sum': 0.0
+        'tpot_sum': 0.0,
+        'e2e_count': 0,
+        'e2e_sum': 0.0,
+        'gen_tokens_count': 0,
+        'gen_tokens_sum': 0.0,
     }
 if 'recent_requests' not in st.session_state:
     st.session_state.recent_requests = []
@@ -67,49 +71,79 @@ if metrics_text:
         with col4:
             st.metric("CPU Cache Usage", f"{get_metric_value('vllm:cpu_cache_usage_perc') * 100:.1f}%")
             
-        # Calculate TTFT and TPS for new requests
+        # Calculate TTFT, E2E latency, output tokens, and TPS for new requests
         current_ttft_count = get_metric_value("vllm:time_to_first_token_seconds_count")
         current_ttft_sum = get_metric_value("vllm:time_to_first_token_seconds_sum")
+        # TPOT is recorded when a request *completes*, so its count may lag behind TTFT count
         current_tpot_count = get_metric_value("vllm:request_time_per_output_token_seconds_count")
         current_tpot_sum = get_metric_value("vllm:request_time_per_output_token_seconds_sum")
-        
+        current_e2e_count = get_metric_value("vllm:e2e_request_latency_seconds_count")
+        current_e2e_sum = get_metric_value("vllm:e2e_request_latency_seconds_sum")
+        current_gen_tokens_count = get_metric_value("vllm:request_generation_tokens_count")
+        current_gen_tokens_sum = get_metric_value("vllm:request_generation_tokens_sum")
+
         prev = st.session_state.prev_metrics
-        
-        if current_ttft_count > prev['ttft_count']:
-            new_requests = int(current_ttft_count - prev['ttft_count'])
+
+        new_ttft_reqs = current_ttft_count - prev['ttft_count']
+        new_tpot_reqs = current_tpot_count - prev['tpot_count']
+
+        if new_ttft_reqs > 0 or new_tpot_reqs > 0:
             ttft_diff = current_ttft_sum - prev['ttft_sum']
             tpot_diff = current_tpot_sum - prev['tpot_sum']
-            
-            avg_ttft = ttft_diff / new_requests if new_requests > 0 else 0
-            avg_tpot = tpot_diff / new_requests if new_requests > 0 else 0
+            e2e_count_diff = current_e2e_count - prev['e2e_count']
+            e2e_diff = current_e2e_sum - prev['e2e_sum']
+            gen_tokens_count_diff = current_gen_tokens_count - prev['gen_tokens_count']
+            gen_tokens_sum_diff = current_gen_tokens_sum - prev['gen_tokens_sum']
+
+            # Avg TTFT uses TTFT count — recorded at first-token emission
+            avg_ttft = ttft_diff / new_ttft_reqs if new_ttft_reqs > 0 else 0
+            # Avg TPOT uses TPOT count — recorded only when a request fully completes
+            avg_tpot = tpot_diff / new_tpot_reqs if new_tpot_reqs > 0 else 0
+            # TPS = tokens per second per request = 1 / TPOT (TPOT is seconds per token)
             avg_tps = 1.0 / avg_tpot if avg_tpot > 0 else 0
-            
+            # Avg end-to-end latency per completed request
+            avg_e2e = e2e_diff / e2e_count_diff if e2e_count_diff > 0 else 0
+            # Avg output tokens per completed request
+            avg_gen_tokens = gen_tokens_sum_diff / gen_tokens_count_diff if gen_tokens_count_diff > 0 else 0
+
             # Add to recent requests
             timestamp = datetime.now().strftime("%H:%M:%S")
             st.session_state.recent_requests.insert(0, {
                 "Time": timestamp,
-                "Requests": new_requests,
+                "TTFT Reqs": int(new_ttft_reqs),
+                "Completed Reqs": int(new_tpot_reqs),
                 "Avg TTFT (s)": round(avg_ttft, 4),
-                "Avg TPS": round(avg_tps, 2)
+                "Avg E2E (s)": round(avg_e2e, 4),
+                "Avg Output Tokens": round(avg_gen_tokens, 1),
+                "Avg TPS (tok/s)": round(avg_tps, 2),
             })
-            
-            # Keep only recent 100 requests
+
+            # Keep only recent 100 records
             st.session_state.recent_requests = st.session_state.recent_requests[:100]
-            
+
             # Update prev metrics
             st.session_state.prev_metrics = {
                 'ttft_count': current_ttft_count,
                 'ttft_sum': current_ttft_sum,
                 'tpot_count': current_tpot_count,
-                'tpot_sum': current_tpot_sum
+                'tpot_sum': current_tpot_sum,
+                'e2e_count': current_e2e_count,
+                'e2e_sum': current_e2e_sum,
+                'gen_tokens_count': current_gen_tokens_count,
+                'gen_tokens_sum': current_gen_tokens_sum,
             }
-        elif current_ttft_count < prev['ttft_count']:
-            # Server restarted
+        elif (current_ttft_count < prev['ttft_count']
+              or current_tpot_count < prev['tpot_count']):
+            # Server restarted — reset baselines
             st.session_state.prev_metrics = {
                 'ttft_count': current_ttft_count,
                 'ttft_sum': current_ttft_sum,
                 'tpot_count': current_tpot_count,
-                'tpot_sum': current_tpot_sum
+                'tpot_sum': current_tpot_sum,
+                'e2e_count': current_e2e_count,
+                'e2e_sum': current_e2e_sum,
+                'gen_tokens_count': current_gen_tokens_count,
+                'gen_tokens_sum': current_gen_tokens_sum,
             }
             
         st.subheader("Recent Requests Performance (TTFT & TPS)")
