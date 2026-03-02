@@ -20,6 +20,8 @@ if 'prev_metrics' not in st.session_state:
         'e2e_sum': 0.0,
         'gen_tokens_count': 0,
         'gen_tokens_sum': 0.0,
+        'prompt_cache_hit': 0.0,
+        'prompt_compute': 0.0,
     }
 if 'recent_requests' not in st.session_state:
     st.session_state.recent_requests = []
@@ -48,6 +50,13 @@ def parse_metrics(metrics_text):
 
 st.title("vLLM Monitoring Dashboard")
 
+st.sidebar.header("设置 (Settings)")
+refresh_interval = st.sidebar.selectbox(
+    "刷新时间 (秒) / Refresh Interval",
+    options=[5, 10, 15, 30, 60],
+    index=2
+)
+
 metrics_text = fetch_metrics()
 if metrics_text:
     df = parse_metrics(metrics_text)
@@ -56,10 +65,13 @@ if metrics_text:
         st.subheader("Key Metrics")
         col1, col2, col3, col4 = st.columns(4)
         
-        def get_metric_value(name):
+        def get_metric_value(name, labels_contains=None):
             res = df[df['name'] == name]
+            if labels_contains:
+                res = res[res['labels'].str.contains(labels_contains)]
             if not res.empty:
-                return res.iloc[0]['value']
+                # In case there are multiple matching labels (e.g. multiple engines), we sum them up
+                return res['value'].sum()
             return 0
 
         with col1:
@@ -81,19 +93,27 @@ if metrics_text:
         current_e2e_sum = get_metric_value("vllm:e2e_request_latency_seconds_sum")
         current_gen_tokens_count = get_metric_value("vllm:request_generation_tokens_count")
         current_gen_tokens_sum = get_metric_value("vllm:request_generation_tokens_sum")
+        
+        # prefix caching tokens
+        current_cache_hit = get_metric_value("vllm:prompt_tokens_by_source_total", "local_cache_hit")
+        current_compute = get_metric_value("vllm:prompt_tokens_by_source_total", "local_compute")
 
         prev = st.session_state.prev_metrics
 
         new_ttft_reqs = current_ttft_count - prev['ttft_count']
         new_tpot_reqs = current_tpot_count - prev['tpot_count']
 
-        if new_ttft_reqs > 0 or new_tpot_reqs > 0:
+        # 只在有请求完全结束时才记录，将这期间的所有指标合并为一条输出
+        if new_tpot_reqs > 0:
             ttft_diff = current_ttft_sum - prev['ttft_sum']
             tpot_diff = current_tpot_sum - prev['tpot_sum']
             e2e_count_diff = current_e2e_count - prev['e2e_count']
             e2e_diff = current_e2e_sum - prev['e2e_sum']
             gen_tokens_count_diff = current_gen_tokens_count - prev['gen_tokens_count']
             gen_tokens_sum_diff = current_gen_tokens_sum - prev['gen_tokens_sum']
+            
+            cache_hit_diff = current_cache_hit - prev['prompt_cache_hit']
+            compute_diff = current_compute - prev['prompt_compute']
 
             # Avg TTFT uses TTFT count — recorded at first-token emission
             avg_ttft = ttft_diff / new_ttft_reqs if new_ttft_reqs > 0 else 0
@@ -105,6 +125,11 @@ if metrics_text:
             avg_e2e = e2e_diff / e2e_count_diff if e2e_count_diff > 0 else 0
             # Avg output tokens per completed request
             avg_gen_tokens = gen_tokens_sum_diff / gen_tokens_count_diff if gen_tokens_count_diff > 0 else 0
+            
+            # Cache hits per request and cache hit rate
+            avg_cache_hit = cache_hit_diff / new_tpot_reqs if new_tpot_reqs > 0 else 0
+            avg_compute = compute_diff / new_tpot_reqs if new_tpot_reqs > 0 else 0
+            cache_hit_rate = cache_hit_diff / (cache_hit_diff + compute_diff) if (cache_hit_diff + compute_diff) > 0 else 0.0
 
             # Add to recent requests
             timestamp = datetime.now().strftime("%H:%M:%S")
@@ -112,10 +137,13 @@ if metrics_text:
                 "Time": timestamp,
                 "TTFT Reqs": int(new_ttft_reqs),
                 "Completed Reqs": int(new_tpot_reqs),
-                "Avg TTFT (s)": round(avg_ttft, 4),
+                "Avg TTFT (ms)": round(avg_ttft * 1000, 2),
                 "Avg E2E (s)": round(avg_e2e, 4),
                 "Avg Output Tokens": round(avg_gen_tokens, 1),
                 "Avg TPS (tok/s)": round(avg_tps, 2),
+                "Avg Cached (tok)": round(avg_cache_hit, 1),
+                "Avg Computed (tok)": round(avg_compute, 1),
+                "Cache Hit Rate": f"{cache_hit_rate * 100:.1f}%",
             })
 
             # Keep only recent 100 records
@@ -131,6 +159,8 @@ if metrics_text:
                 'e2e_sum': current_e2e_sum,
                 'gen_tokens_count': current_gen_tokens_count,
                 'gen_tokens_sum': current_gen_tokens_sum,
+                'prompt_cache_hit': current_cache_hit,
+                'prompt_compute': current_compute,
             }
         elif (current_ttft_count < prev['ttft_count']
               or current_tpot_count < prev['tpot_count']):
@@ -144,6 +174,8 @@ if metrics_text:
                 'e2e_sum': current_e2e_sum,
                 'gen_tokens_count': current_gen_tokens_count,
                 'gen_tokens_sum': current_gen_tokens_sum,
+                'prompt_cache_hit': current_cache_hit,
+                'prompt_compute': current_compute,
             }
             
         st.subheader("Recent Requests Performance (TTFT & TPS)")
@@ -162,6 +194,6 @@ if metrics_text:
 else:
     st.error(f"Failed to fetch metrics from {VLLM_METRICS_URL}. Is vLLM running?")
 
-# Auto-refresh every 2 seconds
-time.sleep(2)
+# 按照侧边栏设置的时间轮询
+time.sleep(refresh_interval)
 st.rerun()
